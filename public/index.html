@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Reservas de Espacios | Gestión Universitaria y Corporativa</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-container">
+      <div class="brand">
+        <span class="brand-icon">RE</span>
+        <div>
+          <h1 class="brand-title">ReservaEspacios</h1>
+          <p class="brand-subtitle">Salas de reunión, laboratorios y áreas de estudio</p>
+        </div>
+      </div>
+      <nav class="main-nav">
+        <a href="#catalogo" class="nav-link active">Espacios Disponibles</a>
+        <a href="#gestionar" class="nav-link">Gestionar Reserva</a>
+      </nav>
+    </div>
+  </header>
+
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+  <main class="container main-content">
+    <section class="hero-section">
+      <div class="hero-text">
+        <h2>Encuentra y reserva tu espacio ideal</h2>
+        <p>Consulta disponibilidad en tiempo real, filtra por capacidad y asegura tu sala sin complicaciones.</p>
+      </div>
+
+      <form id="filterForm" class="filter-card">
+        <div class="filter-grid">
+          <div class="form-group">
+            <label for="filterStartDate">Fecha y hora de inicio</label>
+            <input type="datetime-local" id="filterStartDate" name="filterStartDate">
+          </div>
+          <div class="form-group">
+            <label for="filterEndDate">Fecha y hora de fin</label>
+            <input type="datetime-local" id="filterEndDate" name="filterEndDate">
+          </div>
+          <div class="form-group">
+            <label for="filterCapacity">Capacidad mínima (personas)</label>
+            <input type="number" id="filterCapacity" name="filterCapacity" min="1" placeholder="Ej. 6">
+          </div>
+        </div>
+
+        <div class="filter-actions">
+          <button type="submit" class="btn btn-primary" id="btnSearchAvailability">
+            <span class="btn-text">Consultar Disponibilidad</span>
+            <span class="btn-spinner hidden"></span>
+          </button>
+          <button type="button" class="btn btn-secondary" id="btnResetFilters">Ver Todos los Espacios</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="catalogo" class="catalog-section">
+      <div class="section-header">
+        <div>
+          <h3 class="section-title">Espacios Registrados</h3>
+          <p class="section-subtitle" id="catalogSubtitle">Mostrando todos los espacios activos</p>
+        </div>
+        <span class="badge badge-info" id="spacesCountBadge">Cargando...</span>
+      </div>
+
+      <div id="catalogLoading" class="loading-state">
+        <div class="spinner"></div>
+        <p>Cargando espacios...</p>
+      </div>
+
+      <div id="spacesGrid" class="spaces-grid hidden"></div>
+
+      <div id="catalogEmpty" class="empty-state hidden">
+        <div class="empty-icon">[!]</div>
+        <h4>No se encontraron espacios disponibles</h4>
+        <p>Prueba ajustando los filtros de fecha, hora o capacidad.</p>
+        <button type="button" class="btn btn-secondary" id="btnEmptyReset">Mostrar todos</button>
+      </div>
+    </section>
+
+    <section id="gestionar" class="manage-section">
+      <div class="manage-card">
+        <div class="section-header">
+          <div>
+            <h3 class="section-title">Consultar o Cancelar Reserva</h3>
+            <p class="section-subtitle">Ingresa el ID de tu reserva y el código privado generado al registrarla</p>
+          </div>
+        </div>
+
+        <form id="lookupForm" class="lookup-form">
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="lookupId">ID de Reserva *</label>
+              <input type="number" id="lookupId" name="lookupId" required placeholder="Ej. 1">
+            </div>
+            <div class="form-group">
+              <label for="lookupCode">Código Privado de Cancelación *</label>
+              <input type="text" id="lookupCode" name="lookupCode" required placeholder="Ej. CAN-ABCD-1234" autocomplete="off">
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="btnLookup">
+              <span class="btn-text">Consultar Reserva</span>
+              <span class="btn-spinner hidden"></span>
+            </button>
+          </div>
+        </form>
+
+        <div id="lookupResult" class="lookup-result hidden">
+          <div class="result-header">
+            <h4>Detalles de la Reserva #<span id="resDetailId"></span></h4>
+            <span id="resDetailStatusBadge" class="badge"></span>
+          </div>
+
+          <div class="result-details-grid">
+            <div class="detail-item">
+              <span class="detail-label">Espacio</span>
+              <span class="detail-value" id="resDetailSpace"></span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Ubicación</span>
+              <span class="detail-value" id="resDetailLocation"></span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Titular</span>
+              <span class="detail-value" id="resDetailCustomer"></span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Correo</span>
+              <span class="detail-value" id="resDetailEmail"></span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Hora de Inicio</span>
+              <span class="detail-value" id="resDetailStart"></span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Hora de Fin</span>
+              <span class="detail-value" id="resDetailEnd"></span>
+            </div>
+          </div>
+
+          <div class="result-actions" id="cancelActionsContainer">
+            <button type="button" class="btn btn-danger" id="btnConfirmCancel">
+              <span class="btn-text">Cancelar esta Reserva</span>
+              <span class="btn-spinner hidden"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="bookingModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="bookingModalTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="bookingModalTitle">Reservar Espacio</h3>
+        <button type="button" class="btn-close" id="btnCloseModal" aria-label="Cerrar">&times;</button>
+      </div>
+
+      <div class="selected-space-summary">
+        <h4 id="modalSpaceName">Sala</h4>
+        <p id="modalSpaceInfo">Ubicación y capacidad</p>
+      </div>
+
+      <form id="bookingForm" class="modal-form">
+        <input type="hidden" id="modalSpaceId" name="spaceId">
+
+        <div class="form-group">
+          <label for="customerName">Nombre completo del solicitante *</label>
+          <input type="text" id="customerName" name="customerName" required placeholder="Ej. Juan Pérez">
+        </div>
+
+        <div class="form-group">
+          <label for="customerEmail">Correo electrónico institucional o personal *</label>
+          <input type="email" id="customerEmail" name="customerEmail" required placeholder="Ej. juan.perez@universidad.edu">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="bookingStart">Inicio de reserva *</label>
+            <input type="datetime-local" id="bookingStart" name="startTime" required>
+          </div>
+          <div class="form-group">
+            <label for="bookingEnd">Fin de reserva *</label>
+            <input type="datetime-local" id="bookingEnd" name="endTime" required>
+          </div>
+        </div>
+
+        <div id="modalAlert" class="alert alert-danger hidden"></div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" id="btnCancelBooking">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="btnSubmitBooking">
+            <span class="btn-text">Confirmar Reserva</span>
+            <span class="btn-spinner hidden"></span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="successModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="successModalTitle">
+    <div class="modal-card modal-success">
+      <div class="modal-header">
+        <div class="success-icon-wrap">OK</div>
+        <h3 id="successModalTitle">Reserva Registrada con Exito</h3>
+      </div>
+
+      <div class="modal-body">
+        <p class="success-intro">Su reserva ha sido confirmada en el sistema. Conserve los datos a continuacion:</p>
+
+        <div class="success-details">
+          <p><strong>N° de Reserva:</strong> #<span id="succResId"></span></p>
+          <p><strong>Espacio:</strong> <span id="succSpaceName"></span></p>
+          <p><strong>Horario:</strong> <span id="succSchedule"></span></p>
+          <p><strong>Titular:</strong> <span id="succCustomer"></span></p>
+        </div>
+
+        <div class="cancellation-code-box">
+          <span class="box-label">CODIGO PRIVADO DE CANCELACION</span>
+          <div class="code-display">
+            <code id="succCodeValue">CAN-XXXX-XXXX</code>
+            <button type="button" class="btn-copy" id="btnCopyCode" title="Copiar código al portapapeles">
+              Copiar
+            </button>
+          </div>
+          <p class="code-warning">
+            <strong>Importante:</strong> Este código solo se mostrará una vez. Guárdalo bien; es indispensable para consultar o cancelar tu reserva.
+          </p>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn btn-primary" id="btnCloseSuccess">Aceptar y Finalizar</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <p>© 2026 Sistema de Reservas de Espacios | Proyecto de Portafolio Profesional en Ingeniería de Software</p>
+      <p class="tech-stack-tag">Node.js · Express · MySQL · Vanilla JS (ES6+) · Fetch API</p>
+    </div>
+  </footer>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
