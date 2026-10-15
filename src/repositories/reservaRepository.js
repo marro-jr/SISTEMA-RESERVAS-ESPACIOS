@@ -63,6 +63,13 @@ const reservaRepository = {
     return filas[0] || null;
   },
 
+  // Actualizacion condicional atomica para evitar que dos cancelaciones simultaneas sean exitosas
+  async cancelarSiConfirmada(id, conexion = pool) {
+    const consulta = "UPDATE reservations SET status = 'cancelled' WHERE id = ? AND status = 'confirmed'";
+    const [resultado] = await conexion.query(consulta, [id]);
+    return resultado.affectedRows;
+  },
+
   async actualizarEstado(id, nuevoEstado, conexion = pool) {
     const consulta = 'UPDATE reservations SET status = ? WHERE id = ?';
     const [resultado] = await conexion.query(consulta, [nuevoEstado, id]);
