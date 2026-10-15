@@ -393,7 +393,7 @@ async function manejarConsultaReserva(evento) {
   evento.preventDefault();
 
   const idReserva = elementos.inputConsultaId.value.trim();
-  const codigoCancelacion = elementos.inputConsultaCodigo.value.trim().toUpperCase();
+  const codigoCancelacion = elementos.inputConsultaCodigo.value.trim();
 
   const textoBoton = elementos.botonConsultar.querySelector('.btn-text');
   const spinner = elementos.botonConsultar.querySelector('.btn-spinner');

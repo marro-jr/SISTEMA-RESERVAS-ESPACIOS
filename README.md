@@ -170,13 +170,20 @@ El diseño relacional se compone de dos tablas con integridad referencial, índi
    - Si dos clientes envían solicitudes exactamente al mismo instante para el mismo espacio, una solicitud adquiere el bloqueo, confirma la reserva y la segunda es rechazada con `409 Conflict`.
 5. Liberación por Cancelación:
    - Una reserva cancelada (`status = 'cancelled'`) libera inmediatamente el espacio para que otros usuarios puedan reservarlo.
-6. Idempotencia de Cancelación:
+6. Idempotencia y Cancelación Atómica Condicional:
    - No es posible cancelar una reserva dos veces (retorna `409 Conflict`).
-7. Código Privado Seguro:
-   - Se genera un código aleatorio criptográfico (formato `CAN-XXXX-XXXX`).
-   - El código se devuelve únicamente una vez al crear la reserva.
-   - En la base de datos se guarda exclusivamente su hash generado mediante `bcryptjs` con 10 rondas de salt.
+   - Se utiliza una actualización SQL atómica y condicional:
+     `UPDATE reservations SET status = 'cancelled' WHERE id = ? AND status = 'confirmed'`
+     evaluando las filas afectadas (`affectedRows`).
+   - Si dos solicitudes concurrentes intentan cancelar la misma reserva a la vez, exactamente una actualiza el registro (`affectedRows === 1`, responde `200 OK`) y la segunda es rechazada (`affectedRows === 0`, responde `409 Conflict`), previniendo condiciones de carrera sin dependencias adicionales.
+7. Código Privado Seguro con Entropía de 128 Bits:
+   - Se genera un identificador aleatorio criptográficamente seguro de 128 bits mediante `crypto.randomBytes(16).toString('hex')` (cadena hexadecimal de 32 caracteres).
+   - El código se devuelve al cliente únicamente una vez al crear la reserva y se adapta limpiamente en la interfaz de usuario.
+   - En la base de datos se almacena exclusivamente su hash unidireccional generado mediante `bcryptjs` con 10 rondas de salt.
    - Para consultar los datos o cancelar la reserva, el usuario debe presentar dicho código privado.
+8. Mitigación contra Ataques de Fuerza Bruta (Rate Limiting):
+   - Los endpoints sensibles de consulta y cancelación (`/api/reservations/lookup` y `/api/reservations/:id/cancel`) están protegidos contra intentos reiterados de adivinanza de códigos mediante un middleware de limitación de tasa en memoria.
+   - Ante ráfagas continuas de solicitudes provenientes de una misma IP, el servidor responde `429 Too Many Requests`.
 
 ---
 
@@ -248,12 +255,18 @@ El frontend está compuesto por una vista limpia, responsiva y dividida en 3 flu
    DB_USER=root
    DB_PASSWORD=
    DB_NAME=sistema_reservas
+   DB_NAME_TEST=sistema_reservas_test
    ```
 
 4. Inicializar y poblar la Base de Datos:
-   Ejecuta el script automatizado para crear la base de datos, tablas, restricciones e insertar los datos semilla (seed):
+   Ejecuta el script automatizado para crear la base de datos de desarrollo, tablas, restricciones e insertar los datos semilla (seed):
    ```bash
    npm run db:init
+   ```
+
+   *(Opcional) Si deseas inicializar manualmente la base de datos de pruebas:*
+   ```bash
+   npm run db:init -- --test
    ```
 
 5. Iniciar la aplicación:
@@ -274,17 +287,22 @@ El frontend está compuesto por una vista limpia, responsiva y dividida en 3 flu
 
 ## Ejecución de Pruebas Automatizadas
 
-El proyecto cuenta con una batería de pruebas de integración desarrolladas con Jest y Supertest que verifican el cumplimiento de cada regla de negocio y la resistencia a condiciones de carrera:
+El proyecto cuenta con una batería de pruebas de integración desarrolladas con Jest y Supertest que verifican el cumplimiento de cada regla de negocio, la resistencia a condiciones de carrera y la seguridad de los endpoints.
+
+### Aislamiento Estricto de Base de Datos para Pruebas
+Las pruebas se ejecutan obligatoriamente sobre una base de datos MySQL exclusiva (`sistema_reservas_test`). La configuración del pool de conexiones (`src/config/database.js`) valida activamente que el entorno sea de pruebas (`NODE_ENV === 'test'`) y restringe las operaciones de limpieza y descarte de registros exclusivamente a dicha base, impidiendo cualquier ejecución destructiva o accidental sobre bases de datos de desarrollo o producción.
+
+El comando de prueba inicializa automáticamente el esquema de la base de pruebas antes de lanzar Jest:
 
 ```bash
 npm test
 ```
 
-### Casos de Prueba Verificados
+### Casos de Prueba Verificados (17 pruebas automatizadas)
 - Listado de espacios activos y exclusión de espacios en mantenimiento.
 - Filtro de espacios por capacidad mínima.
 - Consulta de disponibilidad en rangos de fecha y hora.
-- Creación de reserva exitosa con emisión de código privado y respuesta `201 Created`.
+- Creación de reserva exitosa con emisión de código privado seguro de 128 bits (32 caracteres hexadecimales) y respuesta `201 Created`.
 - Rechazo de reservas con horarios superpuestos (`409 Conflict`).
 - Rechazo de fechas con hora fin anterior a la de inicio (`400 Bad Request`).
 - Rechazo de reservas en fechas pasadas (`400 Bad Request`).
@@ -292,9 +310,12 @@ npm test
 - Rechazo de reserva en espacios inactivos (`400 Bad Request`).
 - Consulta de reserva mediante código privado sin revelar el hash (`200 OK`).
 - Rechazo de consulta con código de cancelación erróneo (`401 Unauthorized`).
+- Rechazo de intento de cancelación con código incorrecto (`401 Unauthorized`).
 - Cancelación exitosa de reserva y liberación del espacio para nuevas reservas (`200 OK`).
 - Rechazo de intento de cancelar dos veces la misma reserva (`409 Conflict`).
-- Prueba de Concurrencia: Dos solicitudes simultáneas disparadas en paralelo (`Promise.all`) para el mismo espacio y horario; se valida que exactamente una responde `201 Created` y la otra `409 Conflict`, evitando reservas incompatibles.
+- Concurrencia en Reservas: Dos solicitudes simultáneas disparadas en paralelo (`Promise.all`) para el mismo espacio y horario; se valida que exactamente una responde `201 Created` y la otra `409 Conflict`, evitando reservas incompatibles.
+- Concurrencia en Cancelaciones: Dos solicitudes simultáneas disparadas en paralelo para cancelar la misma reserva; se valida mediante actualización condicional que exactamente una responde `200 OK` y la otra `409 Conflict`.
+- Mitigación de Fuerza Bruta (Rate Limiting): Se comprueba que ante ráfagas consecutivas de solicitudes en endpoints sensibles, el sistema bloquea con `429 Too Many Requests`.
 
 ---
 
@@ -315,12 +336,18 @@ Permite importar y ejecutar todos los endpoints de prueba tanto para espacios co
    - Todas las sentencias utilizan marcadores de posición `?` mediante `mysql2/promise`, eliminando completamente vulnerabilidades de inyección SQL (SQLi).
 3. Transacciones y Bloqueo Pesimista (Pessimistic Locking):
    - Se utilizaron transacciones nativas de MySQL InnoDB con cláusula `FOR UPDATE`. Esto asegura consistencia estricta (ACID) y serialización segura de reservas concurrentes.
-4. Seguridad del Código Privado:
-   - Se almacena su hash con `bcryptjs` (salt 10). La API no expone el hash en ningún endpoint, protegiendo la privacidad del usuario.
-5. Manejo Centralizado de Errores:
+4. Cancelación Condicional Atómica:
+   - Para evitar condiciones de carrera en cancelaciones paralelas sin requerir bloqueos pesados de tabla, se utiliza `UPDATE reservations SET status = 'cancelled' WHERE id = ? AND status = 'confirmed'` y se verifican las filas afectadas (`affectedRows`).
+5. Seguridad Criptográfica de 128 Bits:
+   - Los códigos de cancelación se generan con `crypto.randomBytes(16).toString('hex')` (32 caracteres hexadecimales, 128 bits de entropía). En base de datos solo se persiste su hash unidireccional con `bcryptjs` (salt 10).
+6. Protección contra Fuerza Bruta (Rate Limiting):
+   - Middleware liviano en memoria que calcula ventanas deslizantes por IP para endpoints sensibles de consulta y cancelación, respondiendo `429 Too Many Requests` ante abusos sin recurrir a dependencias externas.
+7. Separación y Seguridad de Entornos de Base de Datos:
+   - Las pruebas automáticas operan contra una base de datos aislada (`sistema_reservas_test`) protegida con salvaguardas que bloquean la ejecución destructiva en bases de datos de desarrollo o producción.
+8. Manejo Centralizado de Errores:
    - Se implementó un middleware central que captura cualquier excepción no controlada o error de negocio con su respectivo código de estado HTTP (`400`, `401`, `404`, `409`, `500`).
-6. Frontend Ligero y Accesible:
-   - Se utilizó HTML5 semántico y CSS3 puro con variables y componentes responsivos, evitando la sobrecarga de frameworks.
+9. Frontend Ligero y Accesible:
+   - Se utilizó HTML5 semántico y CSS3 puro con variables y componentes responsivos, adaptando el diseño para desplegar códigos de 32 caracteres con ajuste de línea fluido.
 
 ---
 

@@ -12,11 +12,22 @@ describe('API de Reservas de Espacios - Pruebas de Integración', () => {
   let codigoCancelacionValido;
 
   beforeAll(async () => {
-    await pool.query('DELETE FROM reservations WHERE customer_email LIKE ?', ['%@test.com']);
+    // Validacion de seguridad obligatoria: verificar que se ejecuta en la base de datos exclusiva de pruebas
+    const baseDatosActual = pool.pool.config.connectionConfig.database;
+    const baseDatosPruebaEsperada = process.env.DB_NAME_TEST || 'sistema_reservas_test';
+
+    if (baseDatosActual !== baseDatosPruebaEsperada) {
+      throw new Error(
+        `Seguridad: las pruebas no deben ejecutarse en la base [${baseDatosActual}]. Se exige [${baseDatosPruebaEsperada}].`
+      );
+    }
+
+    // Limpieza segura en la base de datos exclusiva de pruebas
+    await pool.query('DELETE FROM reservations');
   });
 
   afterAll(async () => {
-    await pool.query('DELETE FROM reservations WHERE customer_email LIKE ?', ['%@test.com']);
+    await pool.query('DELETE FROM reservations');
     await pool.end();
   });
 
@@ -57,7 +68,7 @@ describe('API de Reservas de Espacios - Pruebas de Integración', () => {
   });
 
   describe('2. Registro de Reservas y Reglas de Negocio', () => {
-    test('POST /api/reservations debe crear una reserva válida con código privado', async () => {
+    test('POST /api/reservations debe crear una reserva válida con código privado de 128 bits (32 caracteres hex)', async () => {
       const cargaDatos = {
         espacioId: 1,
         nombreCliente: 'Ana Tester',
@@ -72,6 +83,9 @@ describe('API de Reservas de Espacios - Pruebas de Integración', () => {
       expect(respuesta.body.success).toBe(true);
       expect(respuesta.body.data).toHaveProperty('id');
       expect(respuesta.body.data).toHaveProperty('codigoCancelacion');
+
+      // Verifica 128 bits de entropía en formato hexadecimal (32 caracteres)
+      expect(respuesta.body.data.codigoCancelacion).toMatch(/^[a-f0-9]{32}$/);
 
       idReservaCreada = respuesta.body.data.id;
       codigoCancelacionValido = respuesta.body.data.codigoCancelacion;
@@ -179,7 +193,7 @@ describe('API de Reservas de Espacios - Pruebas de Integración', () => {
         .post('/api/reservations/lookup')
         .send({
           idReserva: idReservaCreada,
-          codigoCancelacion: 'CAN-WRONG-CODE'
+          codigoCancelacion: '0123456789abcdef0123456789abcdef'
         });
 
       expect(respuesta.status).toBe(401);
@@ -189,7 +203,7 @@ describe('API de Reservas de Espacios - Pruebas de Integración', () => {
     test('POST /api/reservations/:id/cancel con código incorrecto debe ser rechazado (401)', async () => {
       const respuesta = await solicitud(app)
         .post(`/api/reservations/${idReservaCreada}/cancel`)
-        .send({ codigoCancelacion: 'CAN-WRONG-CODE' });
+        .send({ codigoCancelacion: '0123456789abcdef0123456789abcdef' });
 
       expect(respuesta.status).toBe(401);
       expect(respuesta.body.success).toBe(false);
@@ -227,8 +241,8 @@ describe('API de Reservas de Espacios - Pruebas de Integración', () => {
     });
   });
 
-  describe('4. Prueba de Integración: Concurrencia y Prevención de Doble Reserva (Race Conditions)', () => {
-    test('Dos solicitudes exactamente simultáneas para el mismo espacio y horario no deben producir doble reserva', async () => {
+  describe('4. Prevención de Condiciones de Carrera (Concurrencia)', () => {
+    test('Dos solicitudes simultáneas de reserva para el mismo horario no deben producir doble reserva', async () => {
       const horarioInicio = `${fechaTexto} 16:00:00`;
       const horarioFin = `${fechaTexto} 18:00:00`;
 
@@ -263,6 +277,60 @@ describe('API de Reservas de Espacios - Pruebas de Integración', () => {
         [horarioInicio]
       );
       expect(filas.length).toBe(1);
+    });
+
+    test('Dos solicitudes simultáneas de cancelación para la misma reserva no deben ser exitosas a la vez', async () => {
+      // 1. Crear una nueva reserva para probar cancelación concurrente
+      const resCrear = await solicitud(app).post('/api/reservations').send({
+        espacioId: 3,
+        nombreCliente: 'Cliente Doble Cancel',
+        correoCliente: 'doblecancel@test.com',
+        fechaInicio: `${fechaTexto} 18:00:00`,
+        fechaFin: `${fechaTexto} 20:00:00`
+      });
+
+      expect(resCrear.status).toBe(201);
+      const reservaId = resCrear.body.data.id;
+      const codigo = resCrear.body.data.codigoCancelacion;
+
+      // 2. Disparar dos cancelaciones exactamente al mismo tiempo
+      const [cancelA, cancelB] = await Promise.all([
+        solicitud(app).post(`/api/reservations/${reservaId}/cancel`).send({ codigoCancelacion: codigo }),
+        solicitud(app).post(`/api/reservations/${reservaId}/cancel`).send({ codigoCancelacion: codigo })
+      ]);
+
+      const estadosCancel = [cancelA.status, cancelB.status].sort();
+
+      // Mediante la actualizacion condicional (UPDATE ... WHERE status = 'confirmed'), exactamente una afecta 1 fila
+      expect(estadosCancel).toEqual([200, 409]);
+
+      const exitosa = cancelA.status === 200 ? cancelA : cancelB;
+      const conflictiva = cancelA.status === 409 ? cancelA : cancelB;
+
+      expect(exitosa.body.data.status).toBe('cancelled');
+      expect(conflictiva.body.error.message).toMatch(/cancelada con anterioridad/i);
+    });
+  });
+
+  describe('5. Límite de Solicitudes y Protección contra Fuerza Bruta (Rate Limiting)', () => {
+    test('Debe responder 429 Too Many Requests cuando se excede el límite de intentos en endpoints sensibles', async () => {
+      // Realizar solicitudes repetidas para forzar el límite de tasa
+      const peticiones = [];
+      for (let i = 0; i < 35; i++) {
+        peticiones.push(
+          solicitud(app)
+            .post('/api/reservations/lookup')
+            .send({ idReserva: 9999, codigoCancelacion: 'intento-invalido' })
+        );
+      }
+
+      const respuestas = await Promise.all(peticiones);
+      const respuestasBloqueadas = respuestas.filter((r) => r.status === 429);
+
+      // Al menos las peticiones que superaron el límite debieron retornar 429
+      expect(respuestasBloqueadas.length).toBeGreaterThan(0);
+      expect(respuestasBloqueadas[0].body.error.statusCode).toBe(429);
+      expect(respuestasBloqueadas[0].body.error.message).toMatch(/Demasiados intentos/i);
     });
   });
 });
