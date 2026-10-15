@@ -92,9 +92,8 @@ const reservaService = {
         throw error;
       }
 
-      // Generación criptográfica del código privado y almacenamiento seguro con bcrypt
-      const bytesAleatorios = crypto.randomBytes(4).toString('hex').toUpperCase();
-      const codigoCancelacion = `CAN-${bytesAleatorios.slice(0, 4)}-${bytesAleatorios.slice(4)}`;
+      // Generación de código con 128 bits de entropía (16 bytes en hexadecimal = 32 caracteres)
+      const codigoCancelacion = crypto.randomBytes(16).toString('hex');
       const hashCodigoCancelacion = await bcrypt.hash(codigoCancelacion, 10);
 
       const idReserva = await reservaRepository.crear(
@@ -160,7 +159,7 @@ const reservaService = {
       throw error;
     }
 
-    const coincide = await bcrypt.compare(codigoCancelacion.trim(), reserva.hashCodigoCancelacion);
+    const coincide = await bcrypt.compare(codigoCancelacion.trim().toLowerCase(), reserva.hashCodigoCancelacion);
     if (!coincide) {
       const error = new Error('El código privado de cancelación es incorrecto.');
       error.statusCode = 401;
@@ -213,14 +212,20 @@ const reservaService = {
       throw error;
     }
 
-    const coincide = await bcrypt.compare(codigoCancelacion.trim(), reserva.hashCodigoCancelacion);
+    const coincide = await bcrypt.compare(codigoCancelacion.trim().toLowerCase(), reserva.hashCodigoCancelacion);
     if (!coincide) {
       const error = new Error('El código privado de cancelación es incorrecto.');
       error.statusCode = 401;
       throw error;
     }
 
-    await reservaRepository.actualizarEstado(idReserva, 'cancelled');
+    // Actualización condicional atómica: solo una solicitud concurrente afectará 1 fila
+    const filasAfectadas = await reservaRepository.cancelarSiConfirmada(idReserva);
+    if (filasAfectadas === 0) {
+      const error = new Error('La reserva ya ha sido cancelada con anterioridad.');
+      error.statusCode = 409;
+      throw error;
+    }
 
     return {
       id: idReserva,
