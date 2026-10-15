@@ -1,0 +1,236 @@
+{
+  "info": {
+    "_postman_id": "a8f7c112-9234-4b52-9b21-8178129038cb",
+    "name": "Sistema de Reservas de Espacios - REST API",
+    "description": "Colección completa de endpoints para el Sistema de Reservas de Espacios compartidos.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "reservationId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "cancellationCode",
+      "value": "CAN-XXXX-XXXX",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Espacios",
+      "item": [
+        {
+          "name": "1. Listar todos los espacios activos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/spaces",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "spaces"]
+            },
+            "description": "Retorna la lista de todos los espacios activos con su capacidad y ubicación."
+          }
+        },
+        {
+          "name": "2. Filtrar espacios por capacidad mínima",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/spaces?minCapacity=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "spaces"],
+              "query": [
+                {
+                  "key": "minCapacity",
+                  "value": "10",
+                  "description": "Capacidad mínima requerida"
+                }
+              ]
+            },
+            "description": "Filtra espacios que tengan una capacidad mayor o igual al parámetro especificado."
+          }
+        },
+        {
+          "name": "3. Consultar disponibilidad por fecha y hora",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/spaces/availability?startTime=2026-10-25 09:00:00&endTime=2026-10-25 11:00:00&minCapacity=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "spaces", "availability"],
+              "query": [
+                {
+                  "key": "startTime",
+                  "value": "2026-10-25 09:00:00"
+                },
+                {
+                  "key": "endTime",
+                  "value": "2026-10-25 11:00:00"
+                },
+                {
+                  "key": "minCapacity",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "Retorna únicamente los espacios que no tienen reservas confirmadas superpuestas en el rango horario."
+          }
+        },
+        {
+          "name": "4. Obtener espacio por ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/spaces/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "spaces", "1"]
+            },
+            "description": "Retorna el detalle completo de un espacio físico."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reservas",
+      "item": [
+        {
+          "name": "1. Crear una reserva",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "if (response.success && response.data) {",
+                  "    pm.collectionVariables.set('reservationId', response.data.id);",
+                  "    pm.collectionVariables.set('cancellationCode', response.data.cancellationCode);",
+                  "    console.log('Variables actualizadas:', response.data.id, response.data.cancellationCode);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"spaceId\": 1,\n  \"customerName\": \"Ana Garcia\",\n  \"customerEmail\": \"ana.garcia@universidad.edu\",\n  \"startTime\": \"2026-10-25 14:00:00\",\n  \"endTime\": \"2026-10-25 16:00:00\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "reservations"]
+            },
+            "description": "Crea una nueva reserva. Retorna el código privado de cancelación que solo se genera y muestra una vez."
+          }
+        },
+        {
+          "name": "2. Crear reserva con horario superpuesto (espera 409 Conflict)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"spaceId\": 1,\n  \"customerName\": \"Carlos Conflictivo\",\n  \"customerEmail\": \"carlos@test.com\",\n  \"startTime\": \"2026-10-25 15:00:00\",\n  \"endTime\": \"2026-10-25 17:00:00\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "reservations"]
+            },
+            "description": "Intenta registrar una reserva en un horario que se traslapa con la reserva anterior. Debe responder 409 Conflict."
+          }
+        },
+        {
+          "name": "3. Consultar reserva por ID y código privado",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reservationId\": {{reservationId}},\n  \"cancellationCode\": \"{{cancellationCode}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations/lookup",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "reservations", "lookup"]
+            },
+            "description": "Permite consultar los datos de una reserva validando el código privado. Nunca revela el hash del código."
+          }
+        },
+        {
+          "name": "4. Cancelar reserva con código privado",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cancellationCode\": \"{{cancellationCode}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations/{{reservationId}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "reservations", "{{reservationId}}", "cancel"]
+            },
+            "description": "Cancela la reserva indicada utilizando su código privado, liberando de inmediato el espacio."
+          }
+        },
+        {
+          "name": "5. Cancelar reserva con código erróneo (espera 401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cancellationCode\": \"CODIGO-INCORRECTO\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations/{{reservationId}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "reservations", "{{reservationId}}", "cancel"]
+            },
+            "description": "Intento de cancelación con un código que no coincide con el hash almacenado. Debe responder 401 Unauthorized."
+          }
+        }
+      ]
+    }
+  ]
+}
